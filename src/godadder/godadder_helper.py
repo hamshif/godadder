@@ -7,19 +7,20 @@ import pandas as pd
 import os
 import sys
 
-from godadder.util import get_db_full_path, get_godaddy_headers
+from godadder.util import get_db_full_path
 
 
 DB_FILE = get_db_full_path(__file__)
 
-
-
-# GODADDY_API_KEY = "3mM44Ywf7decqd_XWuyLNWQbuGZ9ZKWhcdcEd"
-# GODADDY_API_SECRET = "CDXZLbQB2ryxs15uHd2kS8"
 BASE_URL = "https://api.ote-godaddy.com/v1"
 MAX_CALLS_PER_MINUTE = 59
 
-
+def get_godaddy_headers(conf):
+    headers = {
+        "Authorization": f"sso-key {conf.GODADDY_API_KEY}:{conf.GODADDY_API_SECRET}",
+        "Accept": "application/json"
+    }
+    return headers
 
 # --- DATABASE ---
 
