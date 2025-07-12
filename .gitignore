@@ -1,0 +1,16 @@
+# ignore cache files
+*.pyc
+*.pyo
+__pycache__/
+# ignore virtual environment
+venv/
+# ignore build artifacts
+build/
+dist/
+*.egg-info/
+# ignore logs
+*.log
+# ignore database files
+*.db
+*stam.*
+*secret*

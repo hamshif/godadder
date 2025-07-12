@@ -1,0 +1,12 @@
+// {
+//     "python.defaultInterpreterPath": "/home/gideon/.pyenv/shims/python",
+//     "python.pythonPath": "/home/gideon/.pyenv/shims/python"
+// }
+  
+
+// {
+
+//     "python.envFile": "${workspaceFolder}/.env",
+//     // "python.defaultInterpreterPath": "/home/gideon/.pyenv/versions/godadder/bin/python"
+//     "python.defaultInterpreterPath": "/home/gideon/.pyenv/shims/python"
+// }
