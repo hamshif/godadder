@@ -11,7 +11,7 @@ if __name__ == "__main__":
         
     ollama_model = "llama3.3:latest"
     # ollama_model = "deepseek-r1:latest"
-    num_suggestions = 8
+    num_suggestions = 3
 
     latest = get_latest_domain()
     print(f"Latest domain: {latest}")

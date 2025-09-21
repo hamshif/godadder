@@ -49,12 +49,6 @@ def get_app_config():
 
     return config
 
-def get_godaddy_headers(conf):
-    headers = {
-        "Authorization": f"sso-key {conf.GODADDY_API_KEY}:{conf.GODADDY_API_SECRET}",
-        "Accept": "application/json"
-    }
-    return headers
 
 
 if __name__ == "__main__":

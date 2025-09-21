@@ -14,3 +14,12 @@ dist/
 *.db
 *stam.*
 *secret*
+/data/
+# ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+# ignore VS Code settings
+.vscode/
+# ignore temporary files
+*.tmp
+*.temp
+.env

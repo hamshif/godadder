@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 home = os.environ["HOME"]
-project_root = Path(__file__).resolve()
+project_root = Path(__file__).resolve().parent
 
 env_contents = f"""\
 PYTHONPATH={project_root}/src

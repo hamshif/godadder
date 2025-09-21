@@ -42,7 +42,6 @@ def ollama_riff(model, base_domain, n=5, system_prompt=None):
         resp = requests.post(ollama_url, json=body, timeout=60)
         resp.raise_for_status()
         data = resp.json()
-        print("Ollama raw response:", data)  # <-- Add this for debugging
         output = data.get("response", "")
         return [line.strip("- ").strip() for line in output.strip().splitlines() if line.strip()]
     except requests.exceptions.Timeout:
