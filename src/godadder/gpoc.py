@@ -5,6 +5,16 @@ from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel, ValidationError, Field
 from typing import Type, TypeVar, List
 from godadder import nameriffer
+import ast
+import json as _json
+
+try:
+    # Prefer PydanticAI Ollama-backed agent when available
+    from pydantic_ai import Agent as _PAIAgent
+    from pydantic_ai.llms import Ollama as _PAIOllama
+    _HAS_PYDANTIC_AI = True
+except Exception:
+    _HAS_PYDANTIC_AI = False
 
 # --- 1. Pydantic Models ---
 # Model for the structured AI output
@@ -135,7 +145,47 @@ class DefaultNameRiffAgent(NameRiffAgent):
         return nameriffer.ollama_riff(self.model, base, n=count)
 
 
-_default_riff_agent = DefaultNameRiffAgent()
+class PydanticNameRiffAgent(NameRiffAgent):
+    def __init__(self, model: str = "llama3.3:latest"):
+        if not _HAS_PYDANTIC_AI:
+            raise RuntimeError("pydantic-ai not available")
+        self.model = model
+        self._llm = _PAIOllama(model=self.model)
+
+    def riff(self, base: str, count: int) -> List[str]:
+        system_prompt = (
+            "You are a naming assistant. "
+            "Return ONLY a JSON array of strings, no prose."
+        )
+        agent = _PAIAgent(llm=self._llm, system_prompt=system_prompt)
+        user_prompt = (
+            f"Suggest {count} creative, brandable startup domain names inspired by '{base}'. "
+            "Do not repeat the base. Prefer short names."
+        )
+        res = agent.run_sync(user_prompt)
+        # Best-effort robust extraction of a JSON list
+        text = str(getattr(res, "output", res)).strip()
+        if "[" in text and "]" in text:
+            try:
+                start = text.index("[")
+                end = text.rindex("]") + 1
+                data = ast.literal_eval(text[start:end])
+                if isinstance(data, list):
+                    return [str(x).strip() for x in data if str(x).strip()]
+            except Exception:
+                pass
+        # Fallback: split lines
+        return [line.strip("- ").strip() for line in text.splitlines() if line.strip()][:count]
+
+
+_default_riff_agent: NameRiffAgent
+if _HAS_PYDANTIC_AI:
+    try:
+        _default_riff_agent = PydanticNameRiffAgent()
+    except Exception:
+        _default_riff_agent = DefaultNameRiffAgent()
+else:
+    _default_riff_agent = DefaultNameRiffAgent()
 
 
 def get_riff_agent() -> NameRiffAgent:
