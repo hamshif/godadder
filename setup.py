@@ -13,6 +13,7 @@ setup(
         "ipykernel",
         "jupyter",
         "requests",
+        "httpx",
         "pandas",
         "numpy",
         "matplotlib",
@@ -24,7 +25,7 @@ setup(
         "pydantic",
         "pydantic-ai",
         "ollama",
-        "instructor",
+        "pytest",
     ],
     python_requires=">=3.11",
 )
