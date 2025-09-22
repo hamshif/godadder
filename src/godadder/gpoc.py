@@ -2,15 +2,27 @@ import uvicorn
 import os
 import threading
 import time
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel, Field
 from typing import List
 
 # --- FastAPI Application Setup ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    if os.getenv("OLLAMA_WARMUP", "0") == "1":
+        t = threading.Thread(target=_warm_ollama_model, daemon=True)
+        t.start()
+    yield
+    # Shutdown (no-op for now)
+
+
 app = FastAPI(
     title="Name Riffer",
     description="Riff startup domain names via PydanticAI + Ollama.",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 
@@ -132,12 +144,7 @@ def _warm_ollama_model():
         pass
 
 
-@app.on_event("startup")
-def _on_startup():
-    # Enable with OLLAMA_WARMUP=1 to avoid affecting unit tests
-    if os.getenv("OLLAMA_WARMUP", "0") == "1":
-        t = threading.Thread(target=_warm_ollama_model, daemon=True)
-        t.start()
+# (startup handled via lifespan)
 
 # --- 5. Server Runner ---
 if __name__ == "__main__":
