@@ -1,4 +1,7 @@
 import uvicorn
+import os
+import threading
+import time
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel, Field
 from typing import List
@@ -97,6 +100,44 @@ def riff_names(request: RiffRequest, agent: NameRiffAgent = Depends(get_riff_age
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Riff error: {e}")
+
+
+# --- Startup: optional Ollama warm-up ---
+def _warm_ollama_model():
+    try:
+        import requests
+    except Exception:
+        return
+
+    base_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
+    model = os.getenv("OLLAMA_MODEL", "llama3.3:latest")
+
+    # Quick reachability probe (non-fatal)
+    try:
+        requests.get(base_url, timeout=1.5)
+    except Exception:
+        # Ollama isn't reachable; don't block app startup
+        return
+
+    # Best-effort warmup without blocking startup too long
+    try:
+        resp = requests.post(
+            f"{base_url}/api/generate",
+            json={"model": model, "prompt": "Ready?", "stream": False, "keep_alive": "30m"},
+            timeout=15,
+        )
+        # Ignore status errors; this is a warmup hint
+        _ = resp.status_code
+    except Exception:
+        pass
+
+
+@app.on_event("startup")
+def _on_startup():
+    # Enable with OLLAMA_WARMUP=1 to avoid affecting unit tests
+    if os.getenv("OLLAMA_WARMUP", "0") == "1":
+        t = threading.Thread(target=_warm_ollama_model, daemon=True)
+        t.start()
 
 # --- 5. Server Runner ---
 if __name__ == "__main__":
