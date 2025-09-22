@@ -23,3 +23,5 @@ dist/
 *.tmp
 *.temp
 .env
+/src/play
+
