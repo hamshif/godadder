@@ -19,7 +19,12 @@ setup(
         "pillow",
         "exifread",
         "pyhocon",
+        "fastapi",
+        "uvicorn",
+        "pydantic",
         "pydantic-ai",
+        "ollama",
+        "instructor",
     ],
     python_requires=">=3.11",
 )
