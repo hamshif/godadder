@@ -1,9 +1,10 @@
 import uvicorn
 import requests
 import json
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, ValidationError
-from typing import Type, TypeVar
+from fastapi import FastAPI, HTTPException, Depends
+from pydantic import BaseModel, ValidationError, Field
+from typing import Type, TypeVar, List
+from godadder import nameriffer
 
 # --- 1. Pydantic Models ---
 # Model for the structured AI output
@@ -110,7 +111,47 @@ def extract_user_data(request: PromptRequest):
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
 
 
+# --- 4b. Riff Startup Names Endpoint ---
+class RiffRequest(BaseModel):
+    base: str
+    count: int = Field(ge=1, le=50)
+
+
+class NamesResponse(BaseModel):
+    names: List[str]
+
+
+# --- 4c. Name Riffing Agent (DI) ---
+class NameRiffAgent:
+    def riff(self, base: str, count: int) -> List[str]:
+        raise NotImplementedError
+
+
+class DefaultNameRiffAgent(NameRiffAgent):
+    def __init__(self, model: str = "llama3.3:latest"):
+        self.model = model
+
+    def riff(self, base: str, count: int) -> List[str]:
+        return nameriffer.ollama_riff(self.model, base, n=count)
+
+
+_default_riff_agent = DefaultNameRiffAgent()
+
+
+def get_riff_agent() -> NameRiffAgent:
+    return _default_riff_agent
+
+
+@app.post("/riff-names", response_model=NamesResponse)
+def riff_names(request: RiffRequest, agent: NameRiffAgent = Depends(get_riff_agent)):
+    try:
+        names = agent.riff(request.base, request.count)
+        return NamesResponse(names=names)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Riff error: {e}")
+
 # --- 5. Server Runner ---
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8000)
-
