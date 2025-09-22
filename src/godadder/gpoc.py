@@ -5,7 +5,7 @@ import time
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Optional
 
 # --- FastAPI Application Setup ---
 @asynccontextmanager
@@ -30,6 +30,7 @@ app = FastAPI(
 class RiffRequest(BaseModel):
     base: str
     count: int = Field(ge=1, le=50)
+    model: Optional[str] = None  # optional override per request
 
 
 class NamesResponse(BaseModel):
@@ -38,7 +39,7 @@ class NamesResponse(BaseModel):
 
 # --- 4c. Name Riffing Agent (DI) ---
 class NameRiffAgent:
-    def riff(self, base: str, count: int) -> List[str]:
+    def riff(self, base: str, count: int, model: Optional[str] = None) -> List[str]:
         raise NotImplementedError
 
 
@@ -47,12 +48,14 @@ class DefaultNameRiffAgent(NameRiffAgent):
         self.model = model
         self.url = url
 
-    def riff(self, base: str, count: int) -> List[str]:
+    def riff(self, base: str, count: int, model: Optional[str] = None) -> List[str]:
         # Lazy imports to avoid brittle module-level import failures
         import requests
         from pydantic_ai import Agent as _Agent
         from pydantic_ai.models.function import FunctionModel as _FunctionModel
         from pydantic_ai.messages import ModelResponse as _ModelResponse, TextPart as _TextPart
+
+        model_name = (model or self.model)
 
         def _fn_model(messages, agent_info) -> _ModelResponse:
             # Build a simple prompt from system + user parts
@@ -71,7 +74,7 @@ class DefaultNameRiffAgent(NameRiffAgent):
                             user_text.extend([x for x in content if isinstance(x, str)])
             prompt_text = "\n\n".join([t for t in ("\n\n".join(sys_text), "\n\n".join(user_text)) if t])
 
-            body = {"model": self.model, "prompt": prompt_text, "stream": False, "keep_alive": "30m"}
+            body = {"model": model_name, "prompt": prompt_text, "stream": False, "keep_alive": "30m"}
             try:
                 resp = requests.post(self.url, json=body, timeout=60)
                 resp.raise_for_status()
@@ -106,12 +109,46 @@ def get_riff_agent() -> NameRiffAgent:
 @app.post("/riff-names", response_model=NamesResponse)
 def riff_names(request: RiffRequest, agent: NameRiffAgent = Depends(get_riff_agent)):
     try:
-        names = agent.riff(request.base, request.count)
+        names = agent.riff(request.base, request.count, model=request.model)
         return NamesResponse(names=names)
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Riff error: {e}")
+
+
+@app.get("/health")
+def health():
+    """Lightweight health check with Ollama reachability info."""
+    try:
+        import requests
+    except Exception:
+        return {"ok": True, "ollama": {"reachable": False, "error": "requests not available"}}
+
+    base_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
+    model = os.getenv("OLLAMA_MODEL", "llama3.3:latest")
+    reachable = False
+    model_present = None
+    try:
+        r = requests.get(base_url, timeout=1.5)
+        reachable = (200 <= r.status_code < 500)
+    except Exception:
+        reachable = False
+
+    if reachable:
+        try:
+            tags = requests.get(f"{base_url}/api/tags", timeout=2)
+            if tags.ok:
+                data = tags.json()
+                models = [m.get("name") for m in data.get("models", [])]
+                model_present = model in models if model else None
+        except Exception:
+            model_present = None
+
+    return {
+        "ok": True,
+        "ollama": {"reachable": reachable, "model": model, "model_present": model_present},
+    }
 
 
 # --- Startup: optional Ollama warm-up ---
