@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     # Hardcoded warmup: block startup until model is warm to avoid slow first request
     base_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
-    model = os.getenv("OLLAMA_MODEL", "qwen2.5:1.8b")
+    model = os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b")
     wol.warm_model(base_url, model)
     yield
 
@@ -54,7 +54,7 @@ class NameRiffAgent:
 
 
 class DefaultNameRiffAgent(NameRiffAgent):
-    def __init__(self, model: str = "qwen2.5:1.8b", url: str = "http://127.0.0.1:11434/api/generate", options: dict | None = None):
+    def __init__(self, model: str = "qwen2.5:0.5b", url: str = "http://127.0.0.1:11434/api/generate", options: dict | None = None):
         self.model = model
         self.url = url
         self.options = dict(options or OLLAMA_OPTIONS)
@@ -114,7 +114,7 @@ class DefaultNameRiffAgent(NameRiffAgent):
 
 
 _ollama_base = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
-_ollama_model = os.getenv("OLLAMA_MODEL", "qwen2.5:1.8b")
+_ollama_model = os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b")
 default_riff_agent: NameRiffAgent = DefaultNameRiffAgent(model=_ollama_model, url=f"{_ollama_base}/api/generate", options=OLLAMA_OPTIONS)
 
 
@@ -143,7 +143,7 @@ def health():
     """Lightweight health check with Ollama reachability info."""
 
     base_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
-    model = os.getenv("OLLAMA_MODEL", "qwen2.5:1.8b")
+    model = os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b")
     reachable = wol.is_reachable(base_url, timeout=1.5)
     model_present = wol.model_present(base_url, model, timeout=2.0) if reachable else None
 
