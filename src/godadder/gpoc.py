@@ -9,13 +9,20 @@ from typing import List, Optional
 
 # Fail-fast if PydanticAI is not installed/available
 import pydantic_ai as pai
+from wielder.infra.ollama_http import (
+    is_reachable as ollama_is_reachable,
+    model_present as ollama_model_present,
+    warm_model as ollama_warm_model,
+)
 
 # --- FastAPI Application Setup ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     if os.getenv("OLLAMA_WARMUP", "0") == "1":
-        t = threading.Thread(target=warm_ollama_model, daemon=True)
+        base_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
+        model = os.getenv("OLLAMA_MODEL", "llama3.3:latest")
+        t = threading.Thread(target=ollama_warm_model, args=(base_url, model), daemon=True)
         t.start()
     yield
     # Shutdown (no-op for now)
@@ -121,23 +128,8 @@ def health():
 
     base_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
     model = os.getenv("OLLAMA_MODEL", "llama3.3:latest")
-    reachable = False
-    model_present = None
-    try:
-        r = requests.get(base_url, timeout=1.5)
-        reachable = (200 <= r.status_code < 500)
-    except Exception:
-        reachable = False
-
-    if reachable:
-        try:
-            tags = requests.get(f"{base_url}/api/tags", timeout=2)
-            if tags.ok:
-                data = tags.json()
-                models = [m.get("name") for m in data.get("models", [])]
-                model_present = model in models if model else None
-        except Exception:
-            model_present = None
+    reachable = ollama_is_reachable(base_url, timeout=1.5)
+    model_present = ollama_model_present(base_url, model, timeout=2.0) if reachable else None
 
     return {
         "ok": True,
@@ -145,33 +137,7 @@ def health():
     }
 
 
-# --- Startup: optional Ollama warm-up ---
-def warm_ollama_model():
-
-    base_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
-    model = os.getenv("OLLAMA_MODEL", "llama3.3:latest")
-
-    # Quick reachability probe (non-fatal)
-    try:
-        requests.get(base_url, timeout=1.5)
-    except Exception:
-        # Ollama isn't reachable; don't block app startup
-        return
-
-    # Best-effort warmup without blocking startup too long
-    try:
-        resp = requests.post(
-            f"{base_url}/api/generate",
-            json={"model": model, "prompt": "Ready?", "stream": False, "keep_alive": "30m"},
-            timeout=15,
-        )
-        # Ignore status errors; this is a warmup hint
-        _ = resp.status_code
-    except Exception:
-        pass
-
-
-# (startup handled via lifespan)
+# --- Startup: warmup handled via lifespan + wielder.infra.ollama_http ---
 
 # --- 5. Server Runner ---
 if __name__ == "__main__":
