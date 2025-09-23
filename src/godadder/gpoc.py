@@ -2,21 +2,24 @@ import uvicorn
 import os
 import threading
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Response
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
 import pydantic_ai as pai
 from pydantic_ai.models.function import FunctionModel
+import time
+import logging
 import wielder.infra.wollama as wol
+
+logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    if os.getenv("OLLAMA_WARMUP", "0") == "1":
-        base_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
-        model = os.getenv("OLLAMA_MODEL", "llama3.3:latest")
-        t = threading.Thread(target=wol.warm_model, args=(base_url, model), daemon=True)
-        t.start()
+    # Hardcoded warmup: block startup until model is warm to avoid slow first request
+    base_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
+    model = os.getenv("OLLAMA_MODEL", "qwen2.5:1.8b")
+    wol.warm_model(base_url, model)
     yield
 
 
@@ -34,18 +37,29 @@ class RiffRequest(BaseModel):
 
 class NamesResponse(BaseModel):
     names: List[str]
+ 
+# WET hardcoded generation options for quick tweaking during development
+OLLAMA_OPTIONS: dict = {
+    "num_predict": 32,
+    "temperature": 0.4,
+    "top_p": 0.85,
+    "top_k": 50,
+}
+_cpu_threads = os.cpu_count() or 1
+if _cpu_threads > 0:
+    OLLAMA_OPTIONS["num_thread"] = _cpu_threads
 class NameRiffAgent:
     def riff(self, base: str, count: int, model: Optional[str] = None) -> List[str]:
         raise NotImplementedError
 
 
 class DefaultNameRiffAgent(NameRiffAgent):
-    def __init__(self, model: str = "llama3.3:latest", url: str = "http://127.0.0.1:11434/api/generate"):
+    def __init__(self, model: str = "qwen2.5:1.8b", url: str = "http://127.0.0.1:11434/api/generate", options: dict | None = None):
         self.model = model
         self.url = url
+        self.options = dict(options or OLLAMA_OPTIONS)
 
     def riff(self, base: str, count: int, model: Optional[str] = None) -> List[str]:
-
         model_name = (model or self.model)
 
         def ollama_fn_model(messages, agent_info) -> pai.messages.ModelResponse:
@@ -63,10 +77,22 @@ class DefaultNameRiffAgent(NameRiffAgent):
                             user_text.extend([x for x in content if isinstance(x, str)])
             prompt_text = "\n\n".join([t for t in ("\n\n".join(sys_text), "\n\n".join(user_text)) if t])
 
+            t0 = time.perf_counter()
             try:
-                output = wol.generate(self.url, model_name, prompt_text, timeout=60)
+                output = wol.generate(
+                    self.url,
+                    model_name,
+                    prompt_text,
+                    timeout=60,
+                    options=self.options,
+                    stream=True,
+                    stop_after_lines=count,
+                )
             except Exception as e:
                 output = f"Error calling Ollama: {e}"
+            finally:
+                dt = (time.perf_counter() - t0) * 1000.0
+                logger.debug("riff: ollama.generate took %.1f ms", dt)
             return pai.messages.ModelResponse(parts=[pai.messages.TextPart(content=output)])
 
         agent = pai.Agent(
@@ -78,15 +104,18 @@ class DefaultNameRiffAgent(NameRiffAgent):
             ),
         )
 
+        t1 = time.perf_counter()
         result = agent.run_sync(f"Base domain: {base}\nCount: {count}\nGenerate now.")
+        dt = (time.perf_counter() - t1) * 1000.0
+        logger.debug("riff: agent.run_sync total %.1f ms", dt)
         text = str(getattr(result, "output", result)).strip()
         names = [line.strip("- ").strip() for line in text.splitlines() if line.strip()]
         return names[:count]
 
 
 _ollama_base = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
-_ollama_model = os.getenv("OLLAMA_MODEL", "llama3.3:latest")
-default_riff_agent: NameRiffAgent = DefaultNameRiffAgent(model=_ollama_model, url=f"{_ollama_base}/api/generate")
+_ollama_model = os.getenv("OLLAMA_MODEL", "qwen2.5:1.8b")
+default_riff_agent: NameRiffAgent = DefaultNameRiffAgent(model=_ollama_model, url=f"{_ollama_base}/api/generate", options=OLLAMA_OPTIONS)
 
 
 def get_riff_agent() -> NameRiffAgent:
@@ -94,9 +123,14 @@ def get_riff_agent() -> NameRiffAgent:
 
 
 @app.post("/riff-names", response_model=NamesResponse)
-def riff_names(request: RiffRequest, agent: NameRiffAgent = Depends(get_riff_agent)):
+def riff_names(request: RiffRequest, response: Response, agent: NameRiffAgent = Depends(get_riff_agent)):
+    timing = os.getenv("RIFF_TIMING", "0") == "1"
+    t0 = time.perf_counter() if timing else None
     try:
         names = agent.riff(request.base, request.count, model=request.model)
+        if timing and t0 is not None:
+            dt = (time.perf_counter() - t0) * 1000.0
+            response.headers["X-Riff-Server-Ms"] = f"{dt:.1f}"
         return NamesResponse(names=names)
     except HTTPException:
         raise
@@ -109,7 +143,7 @@ def health():
     """Lightweight health check with Ollama reachability info."""
 
     base_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
-    model = os.getenv("OLLAMA_MODEL", "llama3.3:latest")
+    model = os.getenv("OLLAMA_MODEL", "qwen2.5:1.8b")
     reachable = wol.is_reachable(base_url, timeout=1.5)
     model_present = wol.model_present(base_url, model, timeout=2.0) if reachable else None
 
