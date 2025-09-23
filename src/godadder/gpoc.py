@@ -11,15 +11,39 @@ from pydantic_ai.models.function import FunctionModel
 import time
 import logging
 import wielder.infra.wollama as wol
+import requests
 
 logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Hardcoded warmup: block startup until model is warm to avoid slow first request
+    # Require Ollama reachability at startup (except under pytest),
+    # and optionally warm up in a background thread.
     base_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
     model = os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b")
-    wol.warm_model(base_url, model)
+    do_warmup = os.getenv("OLLAMA_WARMUP", "0") == "1"
+
+    if not os.getenv("PYTEST_CURRENT_TEST"):
+        if not wol.is_reachable(base_url, timeout=2.0):
+            logger.error("Ollama not reachable at %s — aborting startup", base_url)
+            raise RuntimeError(f"Ollama not reachable at {base_url}")
+        present = wol.model_present(base_url, model, timeout=2.5)
+        if present is False:
+            logger.warning("Ollama model not present at startup: %s", model)
+
+    def _warmup():
+        try:
+            wol.warm_model(base_url, model)
+        except Exception:
+            # Never fail startup because of warmup
+            logger.debug("Warmup encountered an error; continuing startup.", exc_info=True)
+
+    if do_warmup and not os.getenv("PYTEST_CURRENT_TEST"):
+        try:
+            t = threading.Thread(target=_warmup, daemon=True)
+            t.start()
+        except Exception:
+            logger.debug("Failed to start warmup thread; continuing.", exc_info=True)
     yield
 
 
@@ -88,8 +112,19 @@ class DefaultNameRiffAgent(NameRiffAgent):
                     stream=True,
                     stop_after_lines=count,
                 )
+            except requests.HTTPError as e:
+                status = getattr(getattr(e, "response", None), "status_code", None)
+                if status == 404:
+                    logger.error("Ollama model not found during generate: model=%s url=%s", model_name, self.url)
+                    raise HTTPException(status_code=502, detail=f"Ollama model not found: {model_name}")
+                logger.exception("Ollama HTTP error during generate: %s", e)
+                raise HTTPException(status_code=502, detail="Ollama HTTP error")
+            except requests.RequestException as e:
+                logger.exception("Ollama request error during generate: %s", e)
+                raise HTTPException(status_code=502, detail="Ollama request error")
             except Exception as e:
-                output = f"Error calling Ollama: {e}"
+                logger.exception("Unexpected error during Ollama generate: %s", e)
+                raise HTTPException(status_code=502, detail=f"Ollama error: {e}")
             finally:
                 dt = (time.perf_counter() - t0) * 1000.0
                 logger.debug("riff: ollama.generate took %.1f ms", dt)
