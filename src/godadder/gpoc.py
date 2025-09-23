@@ -6,27 +6,18 @@ from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
-# Fail-fast if PydanticAI is not installed/available
 import pydantic_ai as pai
 from pydantic_ai.models.function import FunctionModel
-from wielder.infra.wollama import (
-    is_reachable as ollama_is_reachable,
-    model_present as ollama_model_present,
-    warm_model as ollama_warm_model,
-    generate as ollama_generate,
-)
+import wielder.infra.wollama as wol
 
-# --- FastAPI Application Setup ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
     if os.getenv("OLLAMA_WARMUP", "0") == "1":
         base_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
         model = os.getenv("OLLAMA_MODEL", "llama3.3:latest")
-        t = threading.Thread(target=ollama_warm_model, args=(base_url, model), daemon=True)
+        t = threading.Thread(target=wol.warm_model, args=(base_url, model), daemon=True)
         t.start()
     yield
-    # Shutdown (no-op for now)
 
 
 app = FastAPI(
@@ -35,20 +26,14 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
-
-
-# --- 4b. Riff Startup Names Endpoint ---
 class RiffRequest(BaseModel):
     base: str
     count: int = Field(ge=1, le=50)
-    model: Optional[str] = None  # optional override per request
+    model: Optional[str] = None
 
 
 class NamesResponse(BaseModel):
     names: List[str]
-
-
-# --- 4c. Name Riffing Agent (DI) ---
 class NameRiffAgent:
     def riff(self, base: str, count: int, model: Optional[str] = None) -> List[str]:
         raise NotImplementedError
@@ -64,11 +49,9 @@ class DefaultNameRiffAgent(NameRiffAgent):
         model_name = (model or self.model)
 
         def ollama_fn_model(messages, agent_info) -> pai.messages.ModelResponse:
-            # Build a simple prompt from system + user parts
             sys_text, user_text = [], []
             for m in messages:
                 for p in getattr(m, "parts", []):
-                    # duck-type on class names to avoid tight coupling
                     cls = p.__class__.__name__
                     content = getattr(p, "content", "")
                     if cls == "SystemPromptPart":
@@ -81,7 +64,7 @@ class DefaultNameRiffAgent(NameRiffAgent):
             prompt_text = "\n\n".join([t for t in ("\n\n".join(sys_text), "\n\n".join(user_text)) if t])
 
             try:
-                output = ollama_generate(self.url, model_name, prompt_text, timeout=60)
+                output = wol.generate(self.url, model_name, prompt_text, timeout=60)
             except Exception as e:
                 output = f"Error calling Ollama: {e}"
             return pai.messages.ModelResponse(parts=[pai.messages.TextPart(content=output)])
@@ -127,8 +110,8 @@ def health():
 
     base_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
     model = os.getenv("OLLAMA_MODEL", "llama3.3:latest")
-    reachable = ollama_is_reachable(base_url, timeout=1.5)
-    model_present = ollama_model_present(base_url, model, timeout=2.0) if reachable else None
+    reachable = wol.is_reachable(base_url, timeout=1.5)
+    model_present = wol.model_present(base_url, model, timeout=2.0) if reachable else None
 
     return {
         "ok": True,
@@ -136,8 +119,5 @@ def health():
     }
 
 
-# --- Startup: warmup handled via lifespan + wielder.infra.wollama ---
-
-# --- 5. Server Runner ---
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8000)

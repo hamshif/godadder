@@ -54,6 +54,11 @@ Branching & Commits
 - Branch naming: `feature/<topic>`; use conventional commit messages (e.g., `feat(api): ...`, `chore: ...`).
 - Squash‑merge allowed to keep history tidy — do it only after explicit confirmation/prompting.
 
+Pushing With Failing Tests
+- It is acceptable to push changes even when unit/integration tests are failing if the user explicitly requests it (e.g., to unblock QA or reproduce an issue).
+- When pushing with failing tests, clearly annotate the commit message with a note such as `chore(ci): push with failing tests (user-approved)`.
+- Do not disable or remove tests unless asked. Prefer preserving failures for later diagnosis.
+
 Out of Scope Patterns
 - Do not import provider‑specific modules like `pydantic_ai.llms.*` at module import time (fragile across versions). Prefer the FunctionModel + HTTP call.
 - Avoid adding long‑running or blocking startup tasks in lifespan; warm‑up is best‑effort and non‑blocking.
