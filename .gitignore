@@ -24,4 +24,5 @@ dist/
 *.temp
 .env
 /src/play
-
+*.venv*
+init.sh
