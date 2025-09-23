@@ -8,6 +8,7 @@ from typing import List, Optional
 
 # Fail-fast if PydanticAI is not installed/available
 import pydantic_ai as pai
+from pydantic_ai.models.function import FunctionModel
 from wielder.infra.wollama import (
     is_reachable as ollama_is_reachable,
     model_present as ollama_model_present,
@@ -86,7 +87,7 @@ class DefaultNameRiffAgent(NameRiffAgent):
             return pai.messages.ModelResponse(parts=[pai.messages.TextPart(content=output)])
 
         agent = pai.Agent(
-            model=pai.models.function.FunctionModel(function=ollama_fn_model, model_name=f"ollama:{self.model}"),
+            model=FunctionModel(function=ollama_fn_model, model_name=f"ollama:{self.model}"),
             system_prompt=(
                 "You are a naming assistant. "
                 f"Suggest exactly {count} creative, brandable domain names inspired by '{base}'. "
@@ -100,7 +101,9 @@ class DefaultNameRiffAgent(NameRiffAgent):
         return names[:count]
 
 
-default_riff_agent: NameRiffAgent = DefaultNameRiffAgent()
+_ollama_base = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
+_ollama_model = os.getenv("OLLAMA_MODEL", "llama3.3:latest")
+default_riff_agent: NameRiffAgent = DefaultNameRiffAgent(model=_ollama_model, url=f"{_ollama_base}/api/generate")
 
 
 def get_riff_agent() -> NameRiffAgent:
