@@ -1,18 +1,21 @@
 import uvicorn
 import os
 import threading
-import time
+import requests
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel, Field
 from typing import List, Optional
+
+# Fail-fast if PydanticAI is not installed/available
+import pydantic_ai as pai
 
 # --- FastAPI Application Setup ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     if os.getenv("OLLAMA_WARMUP", "0") == "1":
-        t = threading.Thread(target=_warm_ollama_model, daemon=True)
+        t = threading.Thread(target=warm_ollama_model, daemon=True)
         t.start()
     yield
     # Shutdown (no-op for now)
@@ -49,15 +52,10 @@ class DefaultNameRiffAgent(NameRiffAgent):
         self.url = url
 
     def riff(self, base: str, count: int, model: Optional[str] = None) -> List[str]:
-        # Lazy imports to avoid brittle module-level import failures
-        import requests
-        from pydantic_ai import Agent as _Agent
-        from pydantic_ai.models.function import FunctionModel as _FunctionModel
-        from pydantic_ai.messages import ModelResponse as _ModelResponse, TextPart as _TextPart
 
         model_name = (model or self.model)
 
-        def _fn_model(messages, agent_info) -> _ModelResponse:
+        def ollama_fn_model(messages, agent_info) -> pai.messages.ModelResponse:
             # Build a simple prompt from system + user parts
             sys_text, user_text = [], []
             for m in messages:
@@ -82,10 +80,10 @@ class DefaultNameRiffAgent(NameRiffAgent):
                 output = data.get("response", "")
             except Exception as e:
                 output = f"Error calling Ollama: {e}"
-            return _ModelResponse(parts=[_TextPart(content=output)])
+            return pai.messages.ModelResponse(parts=[pai.messages.TextPart(content=output)])
 
-        agent = _Agent(
-            model=_FunctionModel(function=_fn_model, model_name=f"ollama:{self.model}"),
+        agent = pai.Agent(
+            model=pai.models.function.FunctionModel(function=ollama_fn_model, model_name=f"ollama:{self.model}"),
             system_prompt=(
                 "You are a naming assistant. "
                 f"Suggest exactly {count} creative, brandable domain names inspired by '{base}'. "
@@ -99,11 +97,11 @@ class DefaultNameRiffAgent(NameRiffAgent):
         return names[:count]
 
 
-_default_riff_agent: NameRiffAgent = DefaultNameRiffAgent()
+default_riff_agent: NameRiffAgent = DefaultNameRiffAgent()
 
 
 def get_riff_agent() -> NameRiffAgent:
-    return _default_riff_agent
+    return default_riff_agent
 
 
 @app.post("/riff-names", response_model=NamesResponse)
@@ -120,10 +118,6 @@ def riff_names(request: RiffRequest, agent: NameRiffAgent = Depends(get_riff_age
 @app.get("/health")
 def health():
     """Lightweight health check with Ollama reachability info."""
-    try:
-        import requests
-    except Exception:
-        return {"ok": True, "ollama": {"reachable": False, "error": "requests not available"}}
 
     base_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
     model = os.getenv("OLLAMA_MODEL", "llama3.3:latest")
@@ -152,11 +146,7 @@ def health():
 
 
 # --- Startup: optional Ollama warm-up ---
-def _warm_ollama_model():
-    try:
-        import requests
-    except Exception:
-        return
+def warm_ollama_model():
 
     base_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
     model = os.getenv("OLLAMA_MODEL", "llama3.3:latest")
