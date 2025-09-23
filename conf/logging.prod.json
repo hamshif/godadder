@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "disable_existing_loggers": false,
+  "formatters": {
+    "prod": {
+      "format": "%(asctime)s level=%(levelname)s logger=%(name)s msg=%(message)s",
+      "datefmt": "%Y-%m-%dT%H:%M:%S%z"
+    }
+  },
+  "handlers": {
+    "console": {
+      "class": "logging.StreamHandler",
+      "formatter": "prod",
+      "stream": "ext://sys.stdout"
+    }
+  },
+  "root": {
+    "level": "INFO",
+    "handlers": ["console"]
+  },
+  "loggers": {
+    "uvicorn": {"level": "INFO"},
+    "uvicorn.error": {"level": "INFO"},
+    "uvicorn.access": {"level": "INFO"},
+    "urllib3": {"level": "WARNING"},
+    "godadder": {"level": "INFO", "handlers": ["console"], "propagate": false},
+    "wielder": {"level": "INFO", "handlers": ["console"], "propagate": false}
+  }
+}
+
