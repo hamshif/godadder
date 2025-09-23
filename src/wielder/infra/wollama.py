@@ -23,7 +23,7 @@ def model_present(base_url: str, model: str, timeout: float = 2.0) -> Optional[b
 
 
 def warm_model(base_url: str, model: str, timeout: float = 15.0, keep_alive: str = "30m") -> None:
-    """Best-effort warmup call; non-raising and non-blocking semantics by design."""
+"""Best-effort warmup call; non-raising and non-blocking semantics by design."""
     # Quick probe to avoid long timeouts if server is down
     if not is_reachable(base_url, timeout=1.5):
         return

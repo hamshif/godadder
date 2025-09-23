@@ -9,7 +9,7 @@ from typing import List, Optional
 
 # Fail-fast if PydanticAI is not installed/available
 import pydantic_ai as pai
-from wielder.infra.ollama_http import (
+from wielder.infra.wollama import (
     is_reachable as ollama_is_reachable,
     model_present as ollama_model_present,
     warm_model as ollama_warm_model,
@@ -137,7 +137,7 @@ def health():
     }
 
 
-# --- Startup: warmup handled via lifespan + wielder.infra.ollama_http ---
+# --- Startup: warmup handled via lifespan + wielder.infra.wollama ---
 
 # --- 5. Server Runner ---
 if __name__ == "__main__":
