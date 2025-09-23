@@ -1,7 +1,6 @@
 import uvicorn
 import os
 import threading
-import requests
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel, Field
@@ -13,6 +12,7 @@ from wielder.infra.wollama import (
     is_reachable as ollama_is_reachable,
     model_present as ollama_model_present,
     warm_model as ollama_warm_model,
+    generate as ollama_generate,
 )
 
 # --- FastAPI Application Setup ---
@@ -79,12 +79,8 @@ class DefaultNameRiffAgent(NameRiffAgent):
                             user_text.extend([x for x in content if isinstance(x, str)])
             prompt_text = "\n\n".join([t for t in ("\n\n".join(sys_text), "\n\n".join(user_text)) if t])
 
-            body = {"model": model_name, "prompt": prompt_text, "stream": False, "keep_alive": "30m"}
             try:
-                resp = requests.post(self.url, json=body, timeout=60)
-                resp.raise_for_status()
-                data = resp.json()
-                output = data.get("response", "")
+                output = ollama_generate(self.url, model_name, prompt_text, timeout=60)
             except Exception as e:
                 output = f"Error calling Ollama: {e}"
             return pai.messages.ModelResponse(parts=[pai.messages.TextPart(content=output)])
