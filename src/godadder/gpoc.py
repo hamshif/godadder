@@ -117,12 +117,23 @@ class DefaultNameRiffAgent(NameRiffAgent):
 
             t0 = time.perf_counter()
             try:
+                npredict = compute_num_predict(count)
+                effective_options = {**self.options, "num_predict": npredict}
+                logger.debug(
+                    "riff: preparing ollama.generate model=%s num_predict=%d options={temperature=%s, top_p=%s, top_k=%s, num_thread=%s}",
+                    model_name,
+                    npredict,
+                    effective_options.get("temperature"),
+                    effective_options.get("top_p"),
+                    effective_options.get("top_k"),
+                    effective_options.get("num_thread"),
+                )
                 output = wol.generate(
                     self.url,
                     model_name,
                     prompt_text,
                     timeout=60,
-                    options={**self.options, "num_predict": compute_num_predict(count)},
+                    options=effective_options,
                     stream=True,
                     stop_after_lines=count,
                 )
