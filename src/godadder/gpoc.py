@@ -15,10 +15,19 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+# POLICY: Ollama fail-fast
+# ---------------------------------
+# This service’s only model backend is Ollama. We intentionally fail
+# application startup if Ollama is unreachable (except when running
+# under pytest where FastAPI lifespan is not required for unit tests).
+# Rationale: running without the model leads to misleading behavior
+# and hidden errors. If future requirements change, update this policy
+# deliberately and audit all callers/tests that rely on fail-fast.
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Require Ollama reachability at startup (except under pytest),
-    # and optionally warm up in a background thread.
+    # Enforce Ollama reachability at startup (except under pytest).
+    # This app depends solely on Ollama; fail-fast if unavailable.
     base_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
     model = os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b")
     do_warmup = os.getenv("OLLAMA_WARMUP", "0") == "1"
