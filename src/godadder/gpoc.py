@@ -72,11 +72,12 @@ class NamesResponse(BaseModel):
     names: List[str]
  
 # WET hardcoded generation options for quick tweaking during development
+# Tuned for higher creativity with acceptable latency. Per-request we
+# compute `num_predict` dynamically from `count` (see `riff`).
 OLLAMA_OPTIONS: dict = {
-    "num_predict": 32,
-    "temperature": 0.4,
-    "top_p": 0.85,
-    "top_k": 50,
+    "temperature": 0.8,
+    "top_p": 0.9,
+    "top_k": 100,
 }
 _cpu_threads = os.cpu_count() or 1
 if _cpu_threads > 0:
@@ -94,6 +95,10 @@ class DefaultNameRiffAgent(NameRiffAgent):
 
     def riff(self, base: str, count: int, model: Optional[str] = None) -> List[str]:
         model_name = (model or self.model)
+
+        def compute_num_predict(n: int) -> int:
+            # Budget ~8 tokens per name line; clamp to [64, 256]
+            return max(64, min(256, 8 * max(1, int(n))))
 
         def ollama_fn_model(messages, agent_info) -> pai.messages.ModelResponse:
             sys_text, user_text = [], []
@@ -117,7 +122,7 @@ class DefaultNameRiffAgent(NameRiffAgent):
                     model_name,
                     prompt_text,
                     timeout=60,
-                    options=self.options,
+                    options={**self.options, "num_predict": compute_num_predict(count)},
                     stream=True,
                     stop_after_lines=count,
                 )
