@@ -9,6 +9,18 @@ Prereqs
   - `uvicorn --app-dir src godadder.startup_namer:app --host 127.0.0.1 --port 8000`
 - Ensure Ollama is running and the model configured by `OLLAMA_MODEL` is present.
 
+run_integration.py
+------------------
+- Starts the server, waits for readiness, runs the integration test, and stops the server.
+
+Usage
+- `PYENV_VERSION=godadder python scripts/run_integration.py`
+- Options:
+  - `--host 127.0.0.1` (default)
+  - `--port 8000` (default)
+  - `--ollama-url http://127.0.0.1:11434`
+  - `--model qwen2.5:0.5b`
+
 try_riff.py
 -----------
 - Riff names via `/riff-names`.
@@ -40,4 +52,3 @@ Notes
 - Use `-r/--raw` to print raw JSON responses.
 - Use `-v/--verbose` for request/response details.
 - Increase `--timeout` if needed.
-
