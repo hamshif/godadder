@@ -1,13 +1,8 @@
-import sqlite3
 import time
 import requests
-import json
-import pandas as pd
+from typing import Iterable
 
-from .util import get_db_full_path
-
-
-DB_FILE = get_db_full_path(__file__)
+from .persistence import DomainStore, SQLiteDomainStore
 
 BASE_URL = "https://api.ote-godaddy.com/v1"
 MAX_CALLS_PER_MINUTE = 59
@@ -20,58 +15,24 @@ def get_godaddy_headers(conf):
     }
 
 
-def setup_db():
-    with sqlite3.connect(DB_FILE) as conn:
-        c = conn.cursor()
-        c.execute(
-            """
-        CREATE TABLE IF NOT EXISTS domains (
-            name TEXT PRIMARY KEY,
-            available INTEGER,
-            definitive INTEGER,
-            price_error TEXT,
-            price REAL,
-            raw_json TEXT,
-            conceived INTEGER
-        )
-        """
-        )
-        try:
-            c.execute("ALTER TABLE domains ADD COLUMN conceived INTEGER")
-        except sqlite3.OperationalError:
-            pass
-        conn.commit()
+_store_singleton: DomainStore | None = None
 
 
-def get_existing_domains():
-    with sqlite3.connect(DB_FILE) as conn:
-        c = conn.cursor()
-        c.execute("SELECT name FROM domains")
-        return {row[0] for row in c.fetchall()}
+def get_domain_store() -> DomainStore:
+    """Return the process-wide domain store (default: SQLite)."""
+    global _store_singleton
+    if _store_singleton is None:
+        _store_singleton = SQLiteDomainStore()
+        _store_singleton.setup()
+    return _store_singleton
 
 
-def upsert_domain(name, info):
-    conceived = int(time.time())
-    with sqlite3.connect(DB_FILE) as conn:
-        c = conn.cursor()
-        c.execute(
-            """
-            INSERT OR REPLACE INTO domains 
-            (name, available, definitive, price_error, price, raw_json, conceived)
-            VALUES (?, ?, ?, ?, ?, ?, COALESCE((SELECT conceived FROM domains WHERE name = ?), ?))
-        """,
-            (
-                name,
-                int(info.get("available", False)),
-                int(info.get("definitive", False)),
-                info.get("price_error", ""),
-                info.get("price", None),
-                json.dumps(info, ensure_ascii=False),
-                name,
-                conceived,
-            ),
-        )
-        conn.commit()
+def get_existing_domains() -> set[str]:
+    return get_domain_store().get_existing_domains()
+
+
+def upsert_domain(name: str, info: dict) -> None:
+    get_domain_store().upsert_domain(name, info)
 
 
 def wait_if_needed(request_times):
@@ -123,34 +84,17 @@ def check_godaddy_domains(domain_list, conf):
     return results
 
 
-def investigate_domains(conf, check_domains):
-    setup_db()
-    checked = get_existing_domains()
+def investigate_domains(conf, check_domains: Iterable[str]):
+    store = get_domain_store()
+    checked = store.get_existing_domains()
     to_check = [d for d in check_domains if d not in checked]
     print("Domains to check (not yet in db):", to_check)
 
     results = check_godaddy_domains(to_check, conf)
     for domain, info in results.items():
-        upsert_domain(domain, info)
-    print(f"Saved {len(results)} new domain results to {DB_FILE}.")
+        store.upsert_domain(domain, info)
+    print(f"Saved {len(results)} new domain results.")
 
 
 def select_domains(columns=None, limit=None, order_by=None, desc=False):
-    with sqlite3.connect(DB_FILE) as conn:
-        c = conn.cursor()
-        if columns is None:
-            c.execute("PRAGMA table_info(domains)")
-            columns = [row[1] for row in c.fetchall()]
-        col_str = ", ".join(columns)
-        sql = f"SELECT {col_str} FROM domains"
-        if order_by:
-            sql += f" ORDER BY {order_by} {'DESC' if desc else ''}"
-        if limit:
-            sql += f" LIMIT {limit}"
-        import pandas as pd  # type: ignore
-
-        df = pd.read_sql_query(sql, conn)
-        if "conceived" in df.columns:
-            df["conceived"] = pd.to_datetime(df["conceived"], unit="s", errors="coerce")
-        return df
-
+    return get_domain_store().select_domains(columns=columns, limit=limit, order_by=order_by, desc=desc)

@@ -13,7 +13,8 @@ import logging
 import wielder.infra.wollama as wol
 import requests
 from .util import get_app_config
-from .domain_helper import check_godaddy_domains
+from .domain_helper import check_godaddy_domains, get_domain_store
+from .persistence import DomainStore
 
 logger = logging.getLogger(__name__)
 
@@ -253,6 +254,7 @@ def get_domain_checker() -> DomainChecker:
 
 class CheckRequest(BaseModel):
     domains: List[str] = Field(min_length=1, max_length=100)
+    persist: Optional[bool] = False
 
 
 class CheckResponse(BaseModel):
@@ -260,7 +262,11 @@ class CheckResponse(BaseModel):
 
 
 @app.post("/check-domains", response_model=CheckResponse)
-def check_domains(req: CheckRequest, checker: DomainChecker = Depends(get_domain_checker)):
+def check_domains(
+    req: CheckRequest,
+    checker: DomainChecker = Depends(get_domain_checker),
+    store: DomainStore = Depends(get_domain_store),
+):
     try:
         seen = set()
         ordered = []
@@ -271,6 +277,13 @@ def check_domains(req: CheckRequest, checker: DomainChecker = Depends(get_domain
             seen.add(dd)
             ordered.append(dd)
         results = checker.check(ordered)
+        if req.persist:
+            for r in results:
+                try:
+                    info = r.model_dump(exclude={"domain"})
+                    store.upsert_domain(r.domain, info)
+                except Exception:
+                    logger.debug("persist upsert failed for %s", r.domain, exc_info=True)
         return CheckResponse(results=results)
     except HTTPException:
         raise
@@ -283,6 +296,7 @@ class RiffAndCheckRequest(BaseModel):
     count: int = Field(ge=1, le=50)
     model: Optional[str] = None
     tlds: Optional[List[str]] = None
+    persist: Optional[bool] = False
 
 
 class RiffAndCheckItem(BaseModel):
@@ -309,7 +323,13 @@ def _label_from_name(name: str) -> str:
 
 
 @app.post("/riff-and-check", response_model=RiffAndCheckResponse)
-def riff_and_check(req: RiffAndCheckRequest, response: Response, agent: NameRiffAgent = Depends(get_riff_agent), checker: DomainChecker = Depends(get_domain_checker)):
+def riff_and_check(
+    req: RiffAndCheckRequest,
+    response: Response,
+    agent: NameRiffAgent = Depends(get_riff_agent),
+    checker: DomainChecker = Depends(get_domain_checker),
+    store: DomainStore = Depends(get_domain_store),
+):
     timing = os.getenv("RIFF_TIMING", "0") == "1"
     t0 = time.perf_counter() if timing else None
     try:
@@ -379,9 +399,26 @@ def riff_and_check(req: RiffAndCheckRequest, response: Response, agent: NameRiff
                 )
             )
 
+    if req.persist:
+        for r in results:
+            try:
+                info = r.model_dump(exclude={"domain"})
+                store.upsert_domain(r.domain, info)
+            except Exception:
+                logger.debug("persist upsert failed for %s", r.domain, exc_info=True)
+
     return RiffAndCheckResponse(items=items, names=names)
+
+
+@app.get("/domains")
+def list_domains(limit: Optional[int] = None, order_by: Optional[str] = None, desc: bool = False, store: DomainStore = Depends(get_domain_store)):
+    """Return stored domain rows (simple JSON list)."""
+    try:
+        df = store.select_domains(columns=None, limit=limit, order_by=order_by, desc=desc)
+        return [dict(row) for row in df.to_dict(orient="records")]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"List domains error: {e}")
 
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8000)
-
