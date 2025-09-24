@@ -49,7 +49,7 @@ def print_versions():
 def run_smoke():
     from fastapi import Response
     from pydantic import ValidationError
-    import godadder.startup_namer as startup_namer
+    import startupper.startup_namer as startup_namer
 
     print(f"App version: {getattr(startup_namer.app, 'version', 'unknown')}")
 

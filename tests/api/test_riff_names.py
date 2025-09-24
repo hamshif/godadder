@@ -1,5 +1,5 @@
 from fastapi.testclient import TestClient
-import godadder.startup_namer as startup_namer
+import startupper.startup_namer as startup_namer
 
 
 def test_riff_names_success():

@@ -6,7 +6,7 @@ Timeout defaults from `RIFF_TIMEOUT` (then `TIMEOUT`) or 30 seconds.
 
 Prereqs
 - Run the API server (fails fast if Ollama is down):
-  - `uvicorn --app-dir src godadder.startup_namer:app --host 127.0.0.1 --port 8000`
+  - `uvicorn --app-dir src startupper.startup_namer:app --host 127.0.0.1 --port 8000`
 - Ensure Ollama is running and the model configured by `OLLAMA_MODEL` is present.
 
 run_integration.py

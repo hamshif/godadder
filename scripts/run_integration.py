@@ -59,7 +59,7 @@ def start_server(repo_root: Path, host: str, port: str, env: dict[str, str], log
         uvicorn,
         "--app-dir",
         str(repo_root / "src"),
-        "godadder.startup_namer:app",
+        "startupper.startup_namer:app",
         "--host",
         host,
         "--port",
@@ -90,8 +90,11 @@ def wait_ready(base_url: str, timeout: float) -> bool:
 
 
 def run_integration(repo_root: Path, api_base_url: str, env: dict[str, str]) -> int:
+    # Run via 'python -m pytest' to avoid shell/entrypoint quirks
     cmd = [
-        shutil.which("pytest") or "pytest",
+        sys.executable,
+        "-m",
+        "pytest",
         "-q",
         "-s",
         "-m",
@@ -153,4 +156,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

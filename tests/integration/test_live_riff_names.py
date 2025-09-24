@@ -18,7 +18,7 @@ def _server_available() -> bool:
 def test_live_riff_names():
     if not _server_available():
         pytest.skip(
-            "Start the server first: `PYENV_VERSION=godadder uvicorn --app-dir src godadder.startup_namer:app --reload`"
+            "Start the server first: `PYENV_VERSION=godadder uvicorn --app-dir src startupper.startup_namer:app --reload`"
         )
 
     payload = {"base": "Aurorify", "count": 3}
