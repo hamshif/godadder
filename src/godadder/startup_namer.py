@@ -12,6 +12,8 @@ import time
 import logging
 import wielder.infra.wollama as wol
 import requests
+from godadder.util import get_app_config
+from godadder.godadder_helper import check_godaddy_domains
 
 logger = logging.getLogger(__name__)
 
@@ -213,6 +215,202 @@ def health():
     }
 
 
+# -------------------
+# GoDaddy integration
+# -------------------
+
+class DomainResult(BaseModel):
+    domain: str
+    available: Optional[bool] = None
+    definitive: Optional[bool] = None
+    price: Optional[float] = None
+    currency: Optional[str] = None
+    price_error: Optional[str] = None
+    error: Optional[str] = None
+
+
+class DomainChecker:
+    def check(self, domains: List[str]) -> List[DomainResult]:
+        raise NotImplementedError
+
+
+class GoDaddyDomainChecker(DomainChecker):
+    def __init__(self, conf):
+        self.conf = conf
+
+    def check(self, domains: List[str]) -> List[DomainResult]:
+        results_map = check_godaddy_domains(domains, self.conf)
+        out: List[DomainResult] = []
+        for d in domains:
+            info = results_map.get(d, {}) or {}
+            out.append(
+                DomainResult(
+                    domain=d,
+                    available=info.get("available"),
+                    definitive=info.get("definitive"),
+                    price=info.get("price"),
+                    currency=info.get("currency"),
+                    price_error=info.get("price_error"),
+                    error=info.get("error"),
+                )
+            )
+        return out
+
+
+_domain_checker: Optional[DomainChecker] = None
+
+
+def get_domain_checker() -> DomainChecker:
+    global _domain_checker
+    if _domain_checker is None:
+        try:
+            conf = get_app_config()
+        except Exception as e:
+            # Surface a clear configuration error if GoDaddy is requested
+            raise RuntimeError(f"GoDaddy config load failed: {e}")
+        _domain_checker = GoDaddyDomainChecker(conf)
+    return _domain_checker
+
+
+class CheckRequest(BaseModel):
+    domains: List[str] = Field(min_length=1, max_length=100)
+
+
+class CheckResponse(BaseModel):
+    results: List[DomainResult]
+
+
+@app.post("/check-domains", response_model=CheckResponse)
+def check_domains(req: CheckRequest, checker: DomainChecker = Depends(get_domain_checker)):
+    try:
+        # Deduplicate while preserving order
+        seen = set()
+        ordered = []
+        for d in req.domains:
+            dd = d.strip().lower()
+            if not dd or dd in seen:
+                continue
+            seen.add(dd)
+            ordered.append(dd)
+        results = checker.check(ordered)
+        return CheckResponse(results=results)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Domain check error: {e}")
+
+
+class RiffAndCheckRequest(BaseModel):
+    base: str
+    count: int = Field(ge=1, le=50)
+    model: Optional[str] = None
+    tlds: Optional[List[str]] = None
+
+
+class RiffAndCheckItem(BaseModel):
+    name: str
+    domain: str
+    available: Optional[bool] = None
+    price: Optional[float] = None
+    currency: Optional[str] = None
+    price_error: Optional[str] = None
+    error: Optional[str] = None
+
+
+class RiffAndCheckResponse(BaseModel):
+    items: List[RiffAndCheckItem]
+    names: List[str]
+
+
+def _label_from_name(name: str) -> str:
+    # Lowercase, drop spaces and punctuation except hyphens; strip any leading/trailing dots
+    s = name.strip().lower()
+    # If already has a dot, take the label part before the first dot
+    if "." in s:
+        s = s.split(".", 1)[0]
+    # Keep alnum and hyphen
+    cleaned = "".join(ch for ch in s if ch.isalnum() or ch == "-")
+    return cleaned
+
+
+@app.post("/riff-and-check", response_model=RiffAndCheckResponse)
+def riff_and_check(req: RiffAndCheckRequest, response: Response, agent: NameRiffAgent = Depends(get_riff_agent), checker: DomainChecker = Depends(get_domain_checker)):
+    timing = os.getenv("RIFF_TIMING", "0") == "1"
+    t0 = time.perf_counter() if timing else None
+    try:
+        names = agent.riff(req.base, req.count, model=req.model)
+        if timing and t0 is not None:
+            response.headers["X-Riff-Server-Ms"] = f"{(time.perf_counter() - t0) * 1000.0:.1f}"
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Riff error: {e}")
+
+    # Build candidate domains
+    default_tlds = [".com", ".ai"]
+    tlds = req.tlds or default_tlds
+    tlds = [t if t.startswith(".") else f".{t}" for t in tlds]
+    domains_to_check: List[str] = []
+    domain_to_name: dict[str, str] = {}
+
+    # Include any names that already look like domains, plus combinations
+    for nm in names:
+        nm = nm.strip()
+        label = _label_from_name(nm)
+        # If input name is already a domain (contains a dot), add it directly
+        if "." in nm:
+            dd = nm.lower()
+            domains_to_check.append(dd)
+            domain_to_name[dd] = nm
+        # Generate combinations with requested TLDs
+        if label:
+            for tld in tlds:
+                dd = f"{label}{tld}"
+                if dd not in domain_to_name:
+                    domains_to_check.append(dd)
+                    domain_to_name[dd] = nm
+
+    # Deduplicate while preserving order and cap total checks
+    seen = set()
+    ordered: List[str] = []
+    for d in domains_to_check:
+        if d not in seen:
+            seen.add(d)
+            ordered.append(d)
+    max_checks = int(os.getenv("CHECK_MAX", "100"))
+    ordered = ordered[:max_checks]
+
+    try:
+        t1 = time.perf_counter() if timing else None
+        results = checker.check(ordered)
+        if timing and t1 is not None:
+            response.headers["X-Check-Server-Ms"] = f"{(time.perf_counter() - t1) * 1000.0:.1f}"
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Domain check error: {e}")
+
+    items: List[RiffAndCheckItem] = []
+    by_domain = {r.domain: r for r in results}
+    for d in ordered:
+        r = by_domain.get(d)
+        if r is None:
+            items.append(RiffAndCheckItem(name=domain_to_name.get(d, d), domain=d, error="no-result"))
+        else:
+            items.append(
+                RiffAndCheckItem(
+                    name=domain_to_name.get(d, d),
+                    domain=r.domain,
+                    available=r.available,
+                    price=r.price,
+                    currency=r.currency,
+                    price_error=r.price_error,
+                    error=r.error,
+                )
+            )
+
+    return RiffAndCheckResponse(items=items, names=names)
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8000)
-
