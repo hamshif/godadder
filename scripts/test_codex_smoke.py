@@ -49,43 +49,42 @@ def print_versions():
 def run_smoke():
     from fastapi import Response
     from pydantic import ValidationError
-    import godadder.gpoc as gpoc
+    import godadder.startup_namer as startup_namer
 
-    print(f"App version: {getattr(gpoc.app, 'version', 'unknown')}")
+    print(f"App version: {getattr(startup_namer.app, 'version', 'unknown')}")
 
     # 1) Success path via direct handler call with a fake agent
-    class FakeAgent(gpoc.NameRiffAgent):
+    class FakeAgent(startup_namer.NameRiffAgent):
         def riff(self, base: str, count: int, model: str | None = None):
             return [f"{base}-{i+1}.ai" for i in range(count)]
 
-    req = gpoc.RiffRequest(base="Acme", count=3)
-    out = gpoc.riff_names(req, Response(), agent=FakeAgent())
+    req = startup_namer.RiffRequest(base="Acme", count=3)
+    out = startup_namer.riff_names(req, Response(), agent=FakeAgent())
     print("success:", json.dumps(out.model_dump(), ensure_ascii=False))
 
     # 2) Validation errors
     try:
-        gpoc.RiffRequest()  # type: ignore[call-arg]
+        startup_namer.RiffRequest()  # type: ignore[call-arg]
         print("validation-missing: UNEXPECTED PASS")
     except ValidationError:
         print("validation-missing: OK")
 
     try:
-        gpoc.RiffRequest(base="Acme", count=0)
+        startup_namer.RiffRequest(base="Acme", count=0)
         print("validation-count: UNEXPECTED PASS")
     except ValidationError:
         print("validation-count: OK")
 
     # 3) Model override tracked via fake agent
-    class FakeAgent2(gpoc.NameRiffAgent):
+    class FakeAgent2(startup_namer.NameRiffAgent):
         def riff(self, base: str, count: int, model: str | None = None):
             assert model == "llamaX"
             return [f"{base}-{i+1}.ai" for i in range(count)]
 
-    out2 = gpoc.riff_names(gpoc.RiffRequest(base="Acme", count=2, model="llamaX"), Response(), agent=FakeAgent2())
+    out2 = startup_namer.riff_names(startup_namer.RiffRequest(base="Acme", count=2, model="llamaX"), Response(), agent=FakeAgent2())
     print("model-override:", json.dumps(out2.model_dump(), ensure_ascii=False))
 
 
 if __name__ == "__main__":
     print_versions()
     run_smoke()
-

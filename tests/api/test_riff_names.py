@@ -1,17 +1,17 @@
 from fastapi.testclient import TestClient
-import godadder.gpoc as gpoc
+import godadder.startup_namer as startup_namer
 
 
 def test_riff_names_success():
     calls = {}
 
-    class FakeAgent(gpoc.NameRiffAgent):
+    class FakeAgent(startup_namer.NameRiffAgent):
         def riff(self, base: str, count: int, model: str | None = None):
             calls["args"] = (base, count, model)
             return [f"{base}-{i+1}.ai" for i in range(count)]
 
-    app = gpoc.app
-    app.dependency_overrides[gpoc.get_riff_agent] = lambda: FakeAgent()
+    app = startup_namer.app
+    app.dependency_overrides[startup_namer.get_riff_agent] = lambda: FakeAgent()
     client = TestClient(app)
 
     resp = client.post("/riff-names", json={"base": "Acme", "count": 3})
@@ -22,7 +22,7 @@ def test_riff_names_success():
 
 
 def test_riff_names_validation_error():
-    app = gpoc.app
+    app = startup_namer.app
     client = TestClient(app)
     # Missing 'base' and 'count'
     resp = client.post("/riff-names", json={})
@@ -36,13 +36,13 @@ def test_riff_names_validation_error():
 def test_riff_names_model_override():
     calls = {}
 
-    class FakeAgent(gpoc.NameRiffAgent):
+    class FakeAgent(startup_namer.NameRiffAgent):
         def riff(self, base: str, count: int, model: str | None = None):
             calls["args"] = (base, count, model)
             return [f"{base}-{i+1}.ai" for i in range(count)]
 
-    app = gpoc.app
-    app.dependency_overrides[gpoc.get_riff_agent] = lambda: FakeAgent()
+    app = startup_namer.app
+    app.dependency_overrides[startup_namer.get_riff_agent] = lambda: FakeAgent()
     client = TestClient(app)
 
     resp = client.post("/riff-names", json={"base": "Acme", "count": 2, "model": "llamaX"})

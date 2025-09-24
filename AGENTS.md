@@ -32,12 +32,12 @@ Env & Running
 - Python: pyenv env `godadder` (3.11). Activate then run `./package_py.sh`.
 - Start server for development/debug:
   - VS Code launch: “API (uvicorn)” in `.vscode/launch.json` (no `--reload`).
-  - Equivalent CLI: `uvicorn --app-dir src godadder.gpoc:app --host 127.0.0.1 --port 8000`.
+  - Equivalent CLI: `uvicorn --app-dir src godadder.startup_namer:app --host 127.0.0.1 --port 8000`.
 - Prefer `--app-dir src` (or set `PYTHONPATH=src`) to avoid import path issues.
 
 Debugging
 - Use VS Code “API (uvicorn)” config. Avoid `--reload` while debugging.
-- Breakpoints should bind in `src/godadder/gpoc.py` (verify via Debug Console if needed).
+- Breakpoints should bind in `src/godadder/startup_namer.py` (verify via Debug Console if needed).
 
 Testing
 - Unit/API tests (in‑process): `pytest -q`. Use FastAPI `TestClient` with dependency overrides.
