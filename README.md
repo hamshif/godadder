@@ -9,10 +9,11 @@ Setup Instructions
    `./package_py.sh`
 
 3) Run tools (with the env active):
-   - `src/godadder/check_godadder.py` to check a sample list and store results.
-   - `src/godadder/check_nameriffer.py` or `src/godadder/riff_names.py` to generate name riffs via Ollama.
-   - `src/godadder/show_domains.py` to print current DB contents.
+   - `python scripts/sanity_checks.py health` to check reachability.
+   - `python scripts/sanity_checks.py riff-names -b acme -n 5` to riff names.
+   - `python scripts/sanity_checks.py check-domains -d acme.ai -d acme.com --persist` to check and store.
+   - `python scripts/sanity_checks.py list-domains --limit 10 --flat` to view stored rows.
 
 Notes
 - The installer script verifies you’re in `pyenv` env `godadder` before installing.
-- Ensure Ollama is running locally; `riff_names.py` can auto-start it when needed.
+- Ensure Ollama is running locally; set `OLLAMA_URL` if non-default.
