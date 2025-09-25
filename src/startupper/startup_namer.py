@@ -80,6 +80,14 @@ class NameRiffAgent:
     def riff(self, base: str, count: int, model: Optional[str] = None) -> List[str]:
         raise NotImplementedError
 
+    def estimate_token_budget(self, count: int) -> int:
+        """Estimate token budget for generating `count` names (clamped).
+
+        Policy: ~8 tokens per item, clamped to [64, 256].
+        Subclasses may override to tune for different models.
+        """
+        return max(64, min(256, 8 * max(1, int(count))))
+
 
 class DefaultNameRiffAgent(NameRiffAgent):
     def __init__(self, model: str = "qwen2.5:0.5b", url: str = "http://127.0.0.1:11434/api/generate", options: dict | None = None):
@@ -90,8 +98,6 @@ class DefaultNameRiffAgent(NameRiffAgent):
     def riff(self, base: str, count: int, model: Optional[str] = None) -> List[str]:
         model_name = (model or self.model)
 
-        def compute_num_predict(n: int) -> int:
-            return max(64, min(256, 8 * max(1, int(n))))
 
         def ollama_fn_model(messages, agent_info) -> pai.messages.ModelResponse:
             sys_text, user_text = [], []
@@ -110,12 +116,13 @@ class DefaultNameRiffAgent(NameRiffAgent):
 
             t0 = time.perf_counter()
             try:
-                npredict = compute_num_predict(count)
-                effective_options = {**self.options, "num_predict": npredict}
+                token_budget = self.estimate_token_budget(count)
+                # Downstream Ollama HTTP expects the option key 'num_predict'
+                effective_options = {**self.options, "num_predict": token_budget}
                 logger.debug(
                     "riff: preparing ollama.generate model=%s num_predict=%d options={temperature=%s, top_p=%s, top_k=%s, num_thread=%s}",
                     model_name,
-                    npredict,
+                    token_budget,
                     effective_options.get("temperature"),
                     effective_options.get("top_p"),
                     effective_options.get("top_k"),
