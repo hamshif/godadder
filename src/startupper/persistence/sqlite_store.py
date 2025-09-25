@@ -49,6 +49,8 @@ class SQLiteDomainStore(DomainStore):
             return {row[0] for row in c.fetchall()}
 
     def upsert_domain(self, name: str, info: dict) -> None:
+        # Ensure schema exists
+        self.setup()
         conceived = int(time.time())
         with sqlite3.connect(self.db_path) as conn:
             c = conn.cursor()
@@ -60,8 +62,8 @@ class SQLiteDomainStore(DomainStore):
                 """,
                 (
                     name,
-                    int(info.get("available", False)),
-                    int(info.get("definitive", False)),
+                    1 if info.get("available") else 0,
+                    1 if info.get("definitive") else 0,
                     info.get("price_error", ""),
                     info.get("price", None),
                     json.dumps(info, ensure_ascii=False),
@@ -78,6 +80,8 @@ class SQLiteDomainStore(DomainStore):
         order_by: str | None = None,
         desc: bool = False,
     ) -> pd.DataFrame:
+        # Ensure schema exists
+        self.setup()
         with sqlite3.connect(self.db_path) as conn:
             c = conn.cursor()
             if columns is None:

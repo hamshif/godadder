@@ -14,8 +14,9 @@ import wielder.infra.wollama as wol
 import requests
 import re
 from startupper.util import get_app_config
-from startupper.domain_helper import check_godaddy_domains, get_domain_store
+from startupper.domain_helper import check_godaddy_domains
 from startupper.persistence import DomainStore
+from startupper.persistence.sqlite_store import SQLiteDomainStore
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,14 @@ app = FastAPI(
     lifespan=lifespan,
     openapi_tags=tags_metadata,
 )
+
+# Default process-wide store; tests may override via DI provider
+app.state.domain_store = SQLiteDomainStore()
+app.state.domain_store.setup()
+
+
+def provide_domain_store() -> DomainStore:
+    return app.state.domain_store
 
 
 class RiffRequest(BaseModel):
@@ -330,7 +339,7 @@ class CheckResponse(BaseModel):
 def check_domains(
     req: CheckRequest,
     checker: DomainChecker = Depends(get_domain_checker),
-    store: DomainStore = Depends(get_domain_store),
+    store: DomainStore = Depends(provide_domain_store),
 ):
     try:
         seen = set()
@@ -361,7 +370,7 @@ class RiffAndCheckRequest(BaseModel):
     count: int = Field(ge=1, le=50)
     model: Optional[str] = None
     tlds: Optional[List[str]] = None
-    persist: Optional[bool] = False
+    persist: Optional[bool] = True
 
 
 class RiffAndCheckItem(BaseModel):
@@ -409,7 +418,7 @@ def riff_and_check(
     response: Response,
     agent: NameRiffAgent = Depends(get_riff_agent),
     checker: DomainChecker = Depends(get_domain_checker),
-    store: DomainStore = Depends(get_domain_store),
+    store: DomainStore = Depends(provide_domain_store),
 ):
     timing = os.getenv("RIFF_TIMING", "0") == "1"
     t0 = time.perf_counter() if timing else None
@@ -499,7 +508,7 @@ def riff_and_check(
     summary="List persisted domains",
     description="List stored domain check results with optional sorting and limiting.",
 )
-def list_domains(limit: Optional[int] = None, order_by: Optional[str] = None, desc: bool = False, store: DomainStore = Depends(get_domain_store)):
+def list_domains(limit: Optional[int] = None, order_by: Optional[str] = None, desc: bool = False, store: DomainStore = Depends(provide_domain_store)):
     """Return stored domain rows (simple JSON list)."""
     try:
         df = store.select_domains(columns=None, limit=limit, order_by=order_by, desc=desc)

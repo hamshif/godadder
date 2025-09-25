@@ -93,6 +93,33 @@ def cmd_list_domains(base: str, timeout: float | None, args: argparse.Namespace)
             name = rec.get("name") or rec.get("domain")
             available = rec.get("available")
             print(f"{name}: {available}")
+    elif args.table:
+        try:
+            import pandas as pd  # type: ignore
+
+            df = pd.DataFrame.from_records(data)
+            # Reorder columns if present
+            cols = [
+                c
+                for c in [
+                    "domain",
+                    "name",
+                    "available",
+                    "price",
+                    "currency",
+                    "price_error",
+                    "error",
+                    "definitive",
+                    "conceived",
+                ]
+                if c in df.columns
+            ]
+            if cols:
+                df = df[cols]
+            print(df.to_string(index=False))
+        except Exception as e:
+            print(f"Failed to render table ({e}); falling back to JSON")
+            print(json.dumps(data, indent=2, ensure_ascii=False))
     else:
         print(json.dumps(data, indent=2, ensure_ascii=False))
     return 0
@@ -130,6 +157,7 @@ def build_parser() -> argparse.ArgumentParser:
     pl.add_argument("--order-by")
     pl.add_argument("--desc", action="store_true")
     pl.add_argument("--flat", action="store_true", help="Print 'name: available' lines instead of JSON")
+    pl.add_argument("--table", action="store_true", help="Pretty-print as a table using pandas")
 
     return p
 
