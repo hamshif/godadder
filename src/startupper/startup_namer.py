@@ -12,6 +12,7 @@ import time
 import logging
 import wielder.infra.wollama as wol
 import requests
+import re
 from startupper.util import get_app_config
 from startupper.domain_helper import check_godaddy_domains, get_domain_store
 from startupper.persistence import DomainStore
@@ -176,7 +177,29 @@ class DefaultNameRiffAgent(NameRiffAgent):
         dt = (time.perf_counter() - t1) * 1000.0
         logger.debug("riff: agent.run_sync total %.1f ms", dt)
         text = str(getattr(result, "output", result)).strip()
-        names = [line.strip("- ").strip() for line in text.splitlines() if line.strip()]
+
+        def _clean_name_line(line: str) -> str:
+            s = line.strip()
+            # Drop leading list markers like "1.", "1)", "-", "*", bullets
+            s = re.sub(r"^\s*(?:\d+[\.)]\s*|[-•*]\s*)", "", s)
+            # Trim stray punctuation
+            s = s.strip(" -–—•*:\t")
+            return s
+
+        raw_lines = [ln for ln in text.splitlines()]
+        cleaned = []
+        for ln in raw_lines:
+            s = _clean_name_line(ln)
+            if not s or s.isdigit():
+                continue
+            cleaned.append(s)
+        # Deduplicate while preserving order
+        seen = set()
+        names: List[str] = []
+        for s in cleaned:
+            if s not in seen:
+                seen.add(s)
+                names.append(s)
         return names[:count]
 
 
@@ -345,10 +368,20 @@ class RiffAndCheckResponse(BaseModel):
     names: List[str]
 
 
+_DOMAIN_RE = re.compile(
+    r"^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_domain(text: str) -> bool:
+    return bool(_DOMAIN_RE.match(text.strip().lower()))
+
+
 def _label_from_name(name: str) -> str:
-    s = name.strip().lower()
-    if "." in s:
-        s = s.split(".", 1)[0]
+    # Normalize: drop list prefixes like "1.", then build a DNS-safe label
+    s = re.sub(r"^\s*(?:\d+[\.)]\s*|[-•*]\s*)", "", name or "")
+    s = s.strip().lower()
     cleaned = "".join(ch for ch in s if ch.isalnum() or ch == "-")
     return cleaned
 
@@ -387,10 +420,12 @@ def riff_and_check(
     for nm in names:
         nm = nm.strip()
         label = _label_from_name(nm)
-        if "." in nm:
+        # Only treat as a direct domain if it actually looks like one
+        if _looks_like_domain(nm):
             dd = nm.lower()
             domains_to_check.append(dd)
             domain_to_name[dd] = nm
+        # Generate combinations with requested TLDs
         if label:
             for tld in tlds:
                 dd = f"{label}{tld}"
