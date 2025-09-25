@@ -23,6 +23,6 @@ dist/
 *.tmp
 *.temp
 .env
-/src/play
+/src/play/*
 *.venv*
 init.sh

@@ -25,6 +25,7 @@ setup(
         "pydantic",
         "pydantic-ai==1.0.10",
         "pytest",
+        'networkx',
     ],
     python_requires=">=3.11",
 )
