@@ -2,7 +2,7 @@ import time
 import requests
 from typing import Iterable
 
-from .persistence import DomainStore, SQLiteDomainStore
+from startupper.persistence import DomainStore, SQLiteDomainStore
 
 BASE_URL = "https://api.ote-godaddy.com/v1"
 MAX_CALLS_PER_MINUTE = 59

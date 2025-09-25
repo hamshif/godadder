@@ -62,3 +62,7 @@ Pushing With Failing Tests
 Out of Scope Patterns
 - Do not import provider‑specific modules like `pydantic_ai.llms.*` at module import time (fragile across versions). Prefer the FunctionModel + HTTP call.
 - Avoid adding long‑running or blocking startup tasks in lifespan; warm‑up is best‑effort and non‑blocking.
+
+Code Style
+- Prefer absolute (fully qualified) imports within project packages (e.g., `from startupper.module import X`) over relative imports (e.g., `from .module import X`).
+- Keep route metadata descriptive (tags, summary, description) for clear, self‑documenting OpenAPI.

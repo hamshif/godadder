@@ -12,9 +12,9 @@ import time
 import logging
 import wielder.infra.wollama as wol
 import requests
-from .util import get_app_config
-from .domain_helper import check_godaddy_domains, get_domain_store
-from .persistence import DomainStore
+from startupper.util import get_app_config
+from startupper.domain_helper import check_godaddy_domains, get_domain_store
+from startupper.persistence import DomainStore
 
 logger = logging.getLogger(__name__)
 
@@ -48,11 +48,18 @@ async def lifespan(app: FastAPI):
     yield
 
 
+tags_metadata = [
+    {"name": "riff", "description": "Generate creative domain name ideas."},
+    {"name": "domains", "description": "Domain availability and pricing checks."},
+    {"name": "system", "description": "Service health and diagnostics."},
+]
+
 app = FastAPI(
     title="Name Riffer",
     description="Riff startup domain names via PydanticAI + Ollama.",
     version="1.0.0",
     lifespan=lifespan,
+    openapi_tags=tags_metadata,
 )
 
 
@@ -182,7 +189,13 @@ def get_riff_agent() -> NameRiffAgent:
     return default_riff_agent
 
 
-@app.post("/riff-names", response_model=NamesResponse)
+@app.post(
+    "/riff-names",
+    response_model=NamesResponse,
+    tags=["riff"],
+    summary="Riff domain names",
+    description="Generate a list of brandable domain names based on a base term.",
+)
 def riff_names(request: RiffRequest, response: Response, agent: NameRiffAgent = Depends(get_riff_agent)):
     timing = os.getenv("RIFF_TIMING", "0") == "1"
     t0 = time.perf_counter() if timing else None
@@ -198,7 +211,12 @@ def riff_names(request: RiffRequest, response: Response, agent: NameRiffAgent = 
         raise HTTPException(status_code=500, detail=f"Riff error: {e}")
 
 
-@app.get("/health")
+@app.get(
+    "/health",
+    tags=["system"],
+    summary="Service health",
+    description="Lightweight health check including Ollama reachability and model presence.",
+)
 def health():
     base_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
     model = os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b")
@@ -268,7 +286,13 @@ class CheckResponse(BaseModel):
     results: List[DomainResult]
 
 
-@app.post("/check-domains", response_model=CheckResponse)
+@app.post(
+    "/check-domains",
+    response_model=CheckResponse,
+    tags=["domains"],
+    summary="Check domain availability",
+    description="Check availability and pricing for one or more domains. Optionally persist results.",
+)
 def check_domains(
     req: CheckRequest,
     checker: DomainChecker = Depends(get_domain_checker),
@@ -329,7 +353,13 @@ def _label_from_name(name: str) -> str:
     return cleaned
 
 
-@app.post("/riff-and-check", response_model=RiffAndCheckResponse)
+@app.post(
+    "/riff-and-check",
+    response_model=RiffAndCheckResponse,
+    tags=["domains", "riff"],
+    summary="Riff names and check availability",
+    description="Generate names, combine with TLDs, and check domain availability/pricing. Optionally persist results.",
+)
 def riff_and_check(
     req: RiffAndCheckRequest,
     response: Response,
@@ -417,7 +447,12 @@ def riff_and_check(
     return RiffAndCheckResponse(items=items, names=names)
 
 
-@app.get("/domains")
+@app.get(
+    "/domains",
+    tags=["domains"],
+    summary="List persisted domains",
+    description="List stored domain check results with optional sorting and limiting.",
+)
 def list_domains(limit: Optional[int] = None, order_by: Optional[str] = None, desc: bool = False, store: DomainStore = Depends(get_domain_store)):
     """Return stored domain rows (simple JSON list)."""
     try:

@@ -7,8 +7,8 @@ from typing import Iterable
 
 import pandas as pd
 
-from .. import util as util_mod
-from .domain_store import DomainStore
+from startupper import util as util_mod
+from startupper.persistence.domain_store import DomainStore
 
 
 def _default_db_path() -> str:
@@ -93,4 +93,3 @@ class SQLiteDomainStore(DomainStore):
             if "conceived" in df.columns:
                 df["conceived"] = pd.to_datetime(df["conceived"], unit="s", errors="coerce")
             return df
-
