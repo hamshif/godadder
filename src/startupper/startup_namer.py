@@ -13,6 +13,10 @@ import logging
 import wielder.infra.wollama as wol
 import requests
 import re
+import asyncio
+from collections import deque
+import anyio
+import httpx
 from startupper.util import get_app_config
 from startupper.domain_helper import check_godaddy_domains
 from startupper.persistence import DomainStore
@@ -307,6 +311,7 @@ class GoDaddyDomainChecker(DomainChecker):
 
 
 _domain_checker: Optional[DomainChecker] = None
+_async_checker: Optional["AsyncGoDaddyDomainChecker"] = None
 
 
 def get_domain_checker() -> DomainChecker:
@@ -318,6 +323,96 @@ def get_domain_checker() -> DomainChecker:
             raise RuntimeError(f"GoDaddy config load failed: {e}")
         _domain_checker = GoDaddyDomainChecker(conf)
     return _domain_checker
+
+
+class AsyncGoDaddyDomainChecker:
+    """Async checker using httpx with bounded concurrency and a simple rate limiter."""
+
+    def __init__(self, conf, *, max_concurrency: int = 8):
+        self.conf = conf
+        self.max_concurrency = max_concurrency
+        self._sem = asyncio.Semaphore(max_concurrency)
+        self._window: deque[float] = deque()  # request timestamps
+        self._lock = asyncio.Lock()
+
+    async def _rate_limit(self):
+        # Enforce MAX_CALLS_PER_MINUTE across concurrent tasks
+        while True:
+            async with self._lock:
+                now = asyncio.get_event_loop().time()
+                # purge older than 60s
+                while self._window and (now - self._window[0] >= 60.0):
+                    self._window.popleft()
+                if len(self._window) <  MAX_CALLS_PER_MINUTE:
+                    self._window.append(now)
+                    return
+                # need to wait until earliest expires
+                wait_for = 60.0 - (now - self._window[0]) + 0.01
+            await asyncio.sleep(max(0.01, wait_for))
+
+    async def _limited_get(self, client: httpx.AsyncClient, url: str, headers: dict, timeout: float = 10.0) -> httpx.Response:
+        await self._rate_limit()
+        async with self._sem:
+            return await client.get(url, headers=headers, timeout=timeout)
+
+    async def check(self, domains: List[str]) -> List[DomainResult]:
+        headers = {
+            "Authorization": f"sso-key {self.conf.GODADDY_API_KEY}:{self.conf.GODADDY_API_SECRET}",
+            "Accept": "application/json",
+        }
+        out: list[DomainResult] = [None] * len(domains)  # type: ignore
+
+        async with httpx.AsyncClient(base_url=BASE_URL) as client:
+            async def worker(idx: int, d: str):
+                info: dict = {}
+                try:
+                    r = await self._limited_get(client, f"/domains/available?domain={d}&checkType=FAST", headers)
+                    if r.status_code == 200:
+                        data = r.json()
+                        info["available"] = data.get("available", False)
+                        info["definitive"] = data.get("definitive", False)
+                    else:
+                        info["error"] = f"Availability: {r.status_code} {r.text}"
+                        out[idx] = DomainResult(domain=d, available=info.get("available"), definitive=info.get("definitive"), price_error=info.get("price_error"), price=info.get("price"), currency=info.get("currency"), error=info.get("error"))
+                        return
+
+                    if info.get("available"):
+                        pr = await self._limited_get(client, f"/domains/price/{d}?action=register", headers)
+                        if pr.status_code == 200:
+                            pdata = pr.json()
+                            info["price_micro"] = pdata.get("price", 0)
+                            info["currency"] = pdata.get("currency", "USD")
+                            info["price"] = pdata.get("price", 0) / 1_000_000
+                        elif pr.status_code == 404:
+                            info["price_error"] = "Pricing not available for this TLD in OTE"
+                        else:
+                            info["price_error"] = f"Price: {pr.status_code} {pr.text}"
+                except Exception as e:
+                    info["error"] = f"Exception: {e}"
+                finally:
+                    out[idx] = DomainResult(
+                        domain=d,
+                        available=info.get("available"),
+                        definitive=info.get("definitive"),
+                        price=info.get("price"),
+                        currency=info.get("currency"),
+                        price_error=info.get("price_error"),
+                        error=info.get("error"),
+                    )
+
+            await asyncio.gather(*(worker(i, d) for i, d in enumerate(domains)))
+        return out  # type: ignore
+
+
+def get_async_domain_checker() -> "AsyncGoDaddyDomainChecker":
+    global _async_checker
+    if _async_checker is None:
+        try:
+            conf = get_app_config()
+        except Exception as e:
+            raise RuntimeError(f"GoDaddy config load failed: {e}")
+        _async_checker = AsyncGoDaddyDomainChecker(conf)
+    return _async_checker
 
 
 class CheckRequest(BaseModel):
@@ -340,6 +435,7 @@ def check_domains(
     req: CheckRequest,
     checker: DomainChecker = Depends(get_domain_checker),
     store: DomainStore = Depends(provide_domain_store),
+    async_checker: AsyncGoDaddyDomainChecker = Depends(get_async_domain_checker),
 ):
     try:
         seen = set()
@@ -350,7 +446,11 @@ def check_domains(
                 continue
             seen.add(dd)
             ordered.append(dd)
-        results = checker.check(ordered)
+        threshold = int(os.getenv("CHECK_ASYNC_THRESHOLD", "4"))
+        if len(ordered) >= threshold:
+            results = anyio.from_thread.run(async_checker.check, ordered)
+        else:
+            results = checker.check(ordered)
         if req.persist:
             for r in results:
                 try:
@@ -419,6 +519,7 @@ def riff_and_check(
     agent: NameRiffAgent = Depends(get_riff_agent),
     checker: DomainChecker = Depends(get_domain_checker),
     store: DomainStore = Depends(provide_domain_store),
+    async_checker: AsyncGoDaddyDomainChecker = Depends(get_async_domain_checker),
 ):
     timing = os.getenv("RIFF_TIMING", "0") == "1"
     t0 = time.perf_counter() if timing else None
@@ -464,7 +565,11 @@ def riff_and_check(
 
     try:
         t1 = time.perf_counter() if timing else None
-        results = checker.check(ordered)
+        threshold = int(os.getenv("CHECK_ASYNC_THRESHOLD", "4"))
+        if len(ordered) >= threshold:
+            results = anyio.from_thread.run(async_checker.check, ordered)
+        else:
+            results = checker.check(ordered)
         if timing and t1 is not None:
             response.headers["X-Check-Server-Ms"] = f"{(time.perf_counter() - t1) * 1000.0:.1f}"
     except HTTPException:
@@ -519,3 +624,4 @@ def list_domains(limit: Optional[int] = None, order_by: Optional[str] = None, de
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8000)
+BASE_URL = "https://api.ote-godaddy.com/v1"
