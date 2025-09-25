@@ -200,6 +200,17 @@ class DefaultNameRiffAgent(NameRiffAgent):
             if s not in seen:
                 seen.add(s)
                 names.append(s)
+
+        # If model produced fewer names than requested, pad with base-derived fallbacks
+        if len(names) < count:
+            base_label = _label_from_name(base) or base.strip().lower()
+            i = 1
+            while len(names) < count and i <= 999:
+                fallback = f"{base_label}-{i}"
+                if fallback not in seen:
+                    names.append(fallback)
+                    seen.add(fallback)
+                i += 1
         return names[:count]
 
 
