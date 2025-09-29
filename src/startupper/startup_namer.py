@@ -18,8 +18,8 @@ from collections import deque
 import anyio
 import httpx
 from startupper.util import get_app_config
-from startupper.domain_helper import check_godaddy_domains
-from startupper.persistence import DomainStore
+from startupper.domain_helper import check_godaddy_domains, BASE_URL, MAX_CALLS_PER_MINUTE
+from startupper.persistence.domain_store import DomainStore
 from startupper.persistence.sqlite_store import SQLiteDomainStore
 
 logger = logging.getLogger(__name__)
@@ -624,4 +624,3 @@ def list_domains(limit: Optional[int] = None, order_by: Optional[str] = None, de
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8000)
-BASE_URL = "https://api.ote-godaddy.com/v1"
