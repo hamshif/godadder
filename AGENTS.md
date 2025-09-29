@@ -45,6 +45,7 @@ Testing
 - Integration test (live server): `tests/integration/test_live_riff_names.py` (marked `integration`).
   - Start server first, then: `pytest -q -s -m integration tests/integration/test_live_riff_names.py::test_live_riff_names`.
 - Policy: no external network calls in unit tests; integration test talks to localhost only.
+ - Codex CLI note: prefer `python -m pytest -q` when running tests here, as the `pytest` shim may not be on PATH (pyenv). Alternatively activate the `godadder` pyenv before running `pytest`.
 
 Operational Notes
 - Ollama must be running for real calls: `ollama serve` and ensure model (e.g., `llama3.3:latest`) is available.
